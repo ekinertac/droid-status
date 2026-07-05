@@ -1,0 +1,13 @@
+{
+  "name": "droid-status",
+  "short_name": "droid-status",
+  "description": "Claude Code usage kiosk",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

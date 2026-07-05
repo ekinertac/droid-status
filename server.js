@@ -102,7 +102,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(403).end('forbidden');
         return;
       }
-      const types = { '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css', '.js': 'text/javascript' };
+      const types = { '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css', '.js': 'text/javascript', '.webmanifest': 'application/manifest+json' };
       try {
         const body = await readFile(filePath);
         res.writeHead(200, {

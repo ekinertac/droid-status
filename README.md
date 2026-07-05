@@ -74,7 +74,7 @@ Slack pane stays parked.
 2. **Install to Workspace**, approve, copy the **User OAuth Token** (`xoxp-…`).
 3. Put it in `config.json` → `slackUserToken` and restart the server.
 
-## Phone (Fully Kiosk Browser)
+## Phone: Android (Fully Kiosk Browser)
 
 1. Install **Fully Kiosk Browser** (free tier is enough).
 2. Start URL: `http://<mac-lan-ip>:4321`.
@@ -86,6 +86,19 @@ Slack pane stays parked.
 4. On MIUI/Xiaomi: give Fully Kiosk the Autostart permission and set battery
    saver to "No restrictions", or MIUI will kill it.
 5. Plug the phone in permanently.
+
+## Phone: iPhone / iPad
+
+The display side is just a browser, so an old iPad makes an excellent kiosk.
+There's no Fully Kiosk on iOS; the equivalent setup:
+
+1. Open `http://<mac-lan-ip>:4321` in Safari → Share → **Add to Home Screen**.
+   The page ships PWA meta tags, so it launches chrome-less and full-screen
+   with a pixel-Clawd icon.
+2. Settings → Display & Brightness → **Auto-Lock: Never**.
+3. Optional but recommended: **Guided Access** (Settings → Accessibility) to
+   pin the device to the dashboard — triple-click the side button to start.
+4. Keep it plugged in.
 
 OLED phone? The page is already true-black; consider a nightly screen-off
 schedule. LCD? Burn-in is a non-issue.
