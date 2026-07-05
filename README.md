@@ -67,6 +67,7 @@ Slack pane stays parked.
          - groups:read
          - im:read
          - mpim:read
+         - users:read
    settings:
      org_deploy_enabled: false
    ```

@@ -23,10 +23,13 @@ failures never crash the server and never blank the display — the page shows
 last-good values plus staleness.
 
 - **Slack** (~60s cycle): official Web API, user token (`xoxp`), scopes
-  `channels:read groups:read im:read mpim:read`. `users.conversations` to
-  enumerate, `conversations.info` per conversation for `unread_count_display`,
-  throttled under the ~50/min Tier-3 limit with 429/Retry-After backoff.
-  Bucket 1 (**Mentions & DMs**) = sum of unread counts over im/mpim.
+  `channels:read groups:read im:read mpim:read users:read`.
+  `users.conversations` to enumerate, `conversations.info` per conversation
+  for `unread_count_display`, throttled under the ~50/min Tier-3 limit with
+  429/Retry-After backoff.
+  Bucket 1 (**Mentions & DMs**) = count of non-bot DM/group-DM conversations
+  with unreads (message sums saturate on never-opened bot DMs; bot detection
+  via `users.info`, degrades to counting them when the scope is missing).
   Bucket 2 (**Channels**) = count of channels with unreads. Channel @mentions
   are NOT promoted to bucket 1 (official-API limitation, accepted).
 - **Claude local usage** (~5 min): shell out to `ccusage daily --json`;
