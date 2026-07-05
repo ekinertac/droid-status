@@ -85,8 +85,6 @@
   }
   header .brand { color: var(--coral); font-weight: 500; text-shadow: 0 0 18px rgba(217,119,87,0.35); }
   header .brand .spark { display: inline-block; animation: spin 14s linear infinite; }
-  #clock { font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
-  #clock .date { color: var(--dim); font-weight: 400; }
 
   /* ── panes (tmux style: title cut into the border) ──────── */
   .pane {
@@ -211,7 +209,6 @@
 <body class="no-slack">
   <header>
     <span class="brand"><span class="spark">✳</span> droid-status</span>
-    <span id="clock">--:--</span>
   </header>
 
   <section class="pane" id="slack-pane">
@@ -408,16 +405,6 @@
     render();
   }
 
-  function tickClock() {
-    const d = new Date();
-    $('clock').innerHTML =
-      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
-      ' <span class="date">· ' +
-      d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) + '</span>';
-  }
-
-  tickClock();
-  setInterval(tickClock, 1000);
   refresh();
   setInterval(refresh, 30000);
   setInterval(render, 15000);       // keeps reset countdowns current

@@ -27,6 +27,15 @@ test('bot DMs are excluded from the count', () => {
   assert.deepEqual(out, { mentionsAndDms: 1, otherUnreadChannels: 0 });
 });
 
+test('a DM whose only unread is a joined-Slack prompt does not count', () => {
+  const out = summarizeUnreads([
+    { is_im: true, unread_count_display: 1, latest: { subtype: 'joiner_notification' } },
+    { is_im: true, unread_count_display: 2, latest: { subtype: 'joiner_notification' } }, // real msg on top
+    { is_im: true, unread_count_display: 1, latest: {} },
+  ]);
+  assert.equal(out.mentionsAndDms, 2);
+});
+
 test('channels count once each regardless of unread volume', () => {
   const out = summarizeUnreads([
     { is_channel: true, unread_count_display: 41 },
