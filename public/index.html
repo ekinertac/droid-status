@@ -1,0 +1,422 @@
+<!--
+  The kiosk page — the ONLY thing the phone ever loads. Single static file
+  (inline CSS/JS, no framework, no build step); shaping the UI is editing this
+  file and letting Fully Kiosk reload. Polls /api/status every 30s; add
+  ?mock=1 to the URL to develop against fixed sample data without live tokens.
+
+  Design language: "terminal kiosk" — tmux-style panes with titles cut into
+  the borders, JetBrains Mono (served locally from /fonts so the kiosk never
+  depends on a CDN), Claude-coral #D97757 as the single accent, pixel-art
+  Clawd (Claude Code's crab mascot, drawn from the PIXEL grid below), the
+  Slack mark in brand colors, subtle scanlines + vignette for CRT depth.
+  Constraints (see spec): true-black bg, LANDSCAPE 2400x1080 (Redmi 10),
+  vh-based sizing, and NEVER show confidently-wrong data — on failure the
+  status line flags it while last-good numbers stay up, dimmed.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>droid-status</title>
+<style>
+  @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; }
+  @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Medium.woff2') format('woff2'); font-weight: 500; }
+  @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-ExtraBold.woff2') format('woff2'); font-weight: 800; }
+
+  :root {
+    --bg: #050505;
+    --fg: #E8E4DD;
+    --dim: #6E6960;
+    --faint: #3A3733;
+    --line: #242220;
+    --coral: #D97757;
+    --coral-deep: #B0552F;
+    --amber: #E0B453;
+    --red: #E05D5D;
+    --green: #7FB069;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 7fr 3fr;
+    grid-template-areas:
+      "head   head"
+      "claude sessions"
+      "status status";
+    padding: 3vh 3vw 2.5vh;
+    column-gap: 2.5vw;
+    row-gap: 3vh;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* CRT atmosphere: scanlines + corner vignette, both extremely subtle */
+  body::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 4px);
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9;
+    background: radial-gradient(ellipse 130% 120% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* ── header ─────────────────────────────────────────────── */
+  header {
+    grid-area: head;
+    display: flex; align-items: baseline; justify-content: space-between;
+    font-size: 3.4vh; color: var(--dim);
+    animation: reveal 0.5s ease-out both;
+  }
+  header .brand { color: var(--coral); font-weight: 500; text-shadow: 0 0 18px rgba(217,119,87,0.35); }
+  header .brand .spark { display: inline-block; animation: spin 14s linear infinite; }
+  #clock { font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+  #clock .date { color: var(--dim); font-weight: 400; }
+
+  /* ── panes (tmux style: title cut into the border) ──────── */
+  .pane {
+    border: 1px solid var(--line);
+    position: relative;
+    padding: 4.5vh 3vw 4vh;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .pane-title {
+    position: absolute; top: 0; left: 2.2vw; transform: translateY(-55%);
+    background: var(--bg); padding: 0 1.2vw;
+    display: flex; align-items: center; gap: 1vw;
+    font-size: 3vh; font-weight: 500; letter-spacing: 0.28em; color: var(--dim);
+  }
+  .pane-title svg { display: block; }
+  #claude-pane   { grid-area: claude; animation: reveal 0.5s 0.12s ease-out both; }
+  #sessions-pane { grid-area: sessions; animation: reveal 0.5s 0.24s ease-out both; align-items: center; }
+
+  /* ── slack pane ─────────────────────────────────────────── */
+  .srow { display: flex; align-items: baseline; gap: 2.2vw; }
+  .srow + .srow { margin-top: 1vh; }
+  .srow .num {
+    font-size: 24vh; line-height: 1.05; font-weight: 800;
+    font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right;
+    color: var(--faint);
+  }
+  .srow .num.hot { color: var(--coral); text-shadow: 0 0 40px rgba(217,119,87,0.4); }
+  .srow .num.live { color: var(--fg); }
+  .srow .lbl { font-size: 3.6vh; color: var(--dim); line-height: 1.3; }
+  .srow .lbl b { display: block; color: var(--fg); font-weight: 500; font-size: 4vh; }
+
+  /* ── claude pane ────────────────────────────────────────── */
+  #claude-pane .cost-line { display: block; }
+  #claude-cost { font-size: 13vh; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #claude-cost .unit { color: var(--coral); }
+  #claude-sub { font-size: 3.2vh; color: var(--dim); margin-top: 1.6vh; }
+  #claude-sub b { color: var(--fg); font-weight: 500; }
+
+  #clawd-col { display: flex; flex-direction: column; align-items: center; gap: 2.2vh; width: 100%; }
+  #clawd { animation: bob 3.2s ease-in-out infinite; filter: drop-shadow(0 6px 14px rgba(217,119,87,0.18)); }
+
+  /* active-session badge: pulsing coral dot while transcripts are being written */
+  #sessions { display: flex; align-items: center; gap: 0.8vw; font-size: 2.8vh; color: var(--fg); font-weight: 500; white-space: nowrap; }
+  #sessions .dot { width: 1.4vh; height: 1.4vh; border-radius: 50%; background: var(--coral); animation: pulse 1.6s ease-in-out infinite; }
+  #sessions.off { color: var(--faint); }
+  #sessions.off .dot { background: var(--faint); animation: none; }
+  /* vertical list of active projects under the badge: left-aligned rows
+     (markers line up), the block itself centered in the pane */
+  #project-list {
+    display: flex; flex-direction: column; gap: 1.4vh;
+    width: fit-content; max-width: 100%; align-self: center; margin-top: 1.5vh;
+  }
+  .proj {
+    font-size: 3vh; color: var(--fg); text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .proj .marker { color: var(--coral); margin-right: 0.6vw; }
+  .proj.more { color: var(--faint); }
+
+  /* forecast tag on the bar meta: appears only when pace hits cap before reset */
+  .bar-meta .cap { color: var(--amber); font-weight: 500; }
+
+  /* 7-day cost sparkline */
+  #spark { margin-top: 3.6vh; }
+  .spark-title { font-size: 2.6vh; letter-spacing: 0.25em; color: var(--dim); margin-bottom: 1.5vh; }
+  #spark-bars { display: flex; gap: 1.4vw; align-items: stretch; height: 14vh; }
+  .sc { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1vh; }
+  .sv { font-size: 2.3vh; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .sbwrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+  .sbar { width: 100%; background: #2A2725; min-height: 2px; }
+  .sc.today .sbar { background: var(--coral); box-shadow: 0 0 20px rgba(217,119,87,0.25); }
+  .sc.today .sv { color: var(--fg); font-weight: 500; }
+  .sl { font-size: 2.1vh; color: var(--faint); letter-spacing: 0.15em; }
+  .sc.today .sl { color: var(--coral); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(217,119,87,0.55); } 50% { box-shadow: 0 0 0 1.2vh rgba(217,119,87,0); } }
+
+  .bar-wrap { margin-top: 3.4vh; }
+  .bar-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 3vh; margin-bottom: 1.2vh; font-variant-numeric: tabular-nums;
+  }
+  .bar-meta .k { color: var(--dim); letter-spacing: 0.18em; }
+  .bar-meta .v { color: var(--fg); font-weight: 500; }
+  .bar-meta .v .reset { color: var(--dim); font-weight: 400; }
+  .bar {
+    height: 3.4vh; background: #121110; border: 1px solid var(--line);
+    position: relative; overflow: hidden;
+  }
+  .bar > div {
+    height: 100%; background: var(--coral); transition: width 0.6s ease;
+    box-shadow: 0 0 24px rgba(217,119,87,0.35);
+  }
+  .bar > div.warn { background: var(--amber); box-shadow: 0 0 24px rgba(224,180,83,0.3); }
+  .bar > div.crit { background: var(--red);  box-shadow: 0 0 24px rgba(224,93,93,0.35); }
+  /* tick marks every 10% so the bar reads like an instrument */
+  .bar::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(90deg, var(--bg) 2px, transparent 2px);
+    background-size: 10% 100%;
+  }
+
+  /* ── status line ────────────────────────────────────────── */
+  #statusline {
+    grid-area: status;
+    font-size: 3vh; color: var(--dim);
+    display: flex; align-items: center; gap: 1vw;
+    animation: reveal 0.5s 0.36s ease-out both;
+  }
+  #statusline .prompt { color: var(--coral); font-weight: 800; }
+  #statusline.stale #status-text { color: var(--amber); }
+  #statusline.dead  #status-text { color: var(--red); }
+  /* filter, not opacity: the reveal animation's fill-mode pins opacity
+     forever (animations out-cascade class rules), so opacity would never
+     apply; filter dims reliably. */
+  .is-stale { filter: brightness(0.45) saturate(0.5); }
+
+  /* Slack parked for now (pane removed from the grid); its markup stays
+     below so bringing it back is a grid-areas change, not an excavation */
+  #slack-pane { display: none; }
+
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2vh); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes reveal { from { opacity: 0; transform: translateY(1.5vh); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body class="no-slack">
+  <header>
+    <span class="brand"><span class="spark">✳</span> droid-status</span>
+    <span id="clock">--:--</span>
+  </header>
+
+  <section class="pane" id="slack-pane">
+    <div class="pane-title">
+      <svg id="slack-mark" width="30" height="30" viewBox="0 0 122.8 122.8" aria-hidden="true">
+        <path fill="#E01E5A" d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9zM32.3 77.6c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6z"/>
+        <path fill="#36C5F0" d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2zM45.2 32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3z"/>
+        <path fill="#2EB67D" d="M97 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97V45.2zM90.5 45.2c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.7 5.8 70.5 0 77.6 0s12.9 5.8 12.9 12.9v32.3z"/>
+        <path fill="#ECB22E" d="M77.6 97c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97h12.9zM77.6 90.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6z"/>
+      </svg>
+      <span>SLACK</span>
+    </div>
+    <div class="srow">
+      <span class="num" id="slack-dm">·</span>
+      <span class="lbl"><b>mentions &amp; DMs</b>needs you</span>
+    </div>
+    <div class="srow">
+      <span class="num" id="slack-ch">·</span>
+      <span class="lbl"><b>unread channels</b>can wait</span>
+    </div>
+  </section>
+
+  <section class="pane" id="claude-pane">
+    <div class="pane-title"><span style="color:var(--coral)">✳</span><span>CLAUDE</span></div>
+    <div class="cost-line">
+      <div id="claude-cost"><span class="unit">$</span>–</div>
+      <div id="claude-sub">today · <b id="claude-week">–</b> last 7 days</div>
+    </div>
+    <div class="bar-wrap">
+      <div class="bar-meta"><span class="k">5-HOUR</span><span class="v" id="l5-meta">–</span></div>
+      <div class="bar"><div id="l5-fill" style="width:0%"></div></div>
+    </div>
+    <div class="bar-wrap">
+      <div class="bar-meta"><span class="k">WEEKLY</span><span class="v" id="lw-meta">–</span></div>
+      <div class="bar"><div id="lw-fill" style="width:0%"></div></div>
+    </div>
+    <div id="spark">
+      <div class="spark-title">LAST 7 DAYS</div>
+      <div id="spark-bars"></div>
+    </div>
+  </section>
+
+  <section class="pane" id="sessions-pane">
+    <div class="pane-title"><span style="color:var(--coral)">✳</span><span>SESSIONS</span></div>
+    <div id="clawd-col">
+      <svg id="clawd" width="0" height="0" aria-hidden="true"></svg>
+      <div id="sessions" class="off"><span class="dot"></span><span id="sessions-text">idle</span></div>
+      <div id="project-list"></div>
+    </div>
+  </section>
+
+  <div id="statusline">
+    <span class="prompt">❯</span>
+    <span id="status-text">connecting…</span>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const mock = new URLSearchParams(location.search).has('mock');
+  let data = null;
+  let lastFetchOk = 0;
+
+  /* ── pixel-art Clawd (Claude Code's crab). Edit the grid, not rects. ── */
+  const PIXEL = { o: '#D97757', d: '#B0552F', k: '#2A1810', w: '#F5EFE7' };
+  const CLAWD = [
+    '.oo........oo.',
+    'ooo........ooo',
+    'o.o........o.o',
+    '.oo........oo.',
+    '..oo......oo..',
+    '...oooooooo...',
+    '..oooooooooo..',
+    '..ookooookoo..',
+    '..ooooddoooo..',
+    '..dooooooood..',
+    '...o..oo..o...',
+  ];
+  (function drawClawd() {
+    const px = 14; // logical pixel size inside the svg
+    const svg = $('clawd');
+    const w = CLAWD[0].length * px, h = CLAWD.length * px;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('width', '16vh'); svg.setAttribute('height', `${16 * h / w}vh`);
+    svg.setAttribute('shape-rendering', 'crispEdges');
+    svg.innerHTML = CLAWD.flatMap((row, y) =>
+      [...row].map((ch, x) => PIXEL[ch]
+        ? `<rect x="${x * px}" y="${y * px}" width="${px}" height="${px}" fill="${PIXEL[ch]}"/>` : '')
+    ).join('');
+  })();
+
+  function fmtCountdown(iso) {
+    if (!iso) return '';
+    const ms = new Date(iso) - Date.now();
+    if (ms <= 0) return 'resetting…';
+    const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 48) return `↻ ${Math.round(h / 24)}d`;
+    return h ? `↻ ${h}h${String(m).padStart(2, '0')}` : `↻ ${m}m`;
+  }
+
+  function fmtAgo(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 90) return `${s}s`;
+    const m = Math.round(s / 60);
+    if (m < 90) return `${m}m`;
+    return `${Math.round(m / 60)}h`;
+  }
+
+  function setBar(fillId, metaId, pct, resetIso, capIso) {
+    const fill = $(fillId);
+    if (pct == null) { $(metaId).textContent = '–'; fill.style.width = '0%'; return; }
+    fill.style.width = Math.min(100, pct) + '%';
+    fill.className = pct >= 90 ? 'crit' : pct >= 70 ? 'warn' : '';
+    // cap forecast is shown only when the current pace hits 100% before the
+    // reset (server sends null otherwise) — absence means "fine".
+    const cap = capIso
+      ? ` <span class="cap">→ cap ~${new Date(capIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`
+      : '';
+    $(metaId).innerHTML = `${Math.round(pct)}% <span class="reset">${fmtCountdown(resetIso)}</span>${cap}`;
+  }
+
+  const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  function renderSpark(days) {
+    if (!days?.length) return;
+    const max = Math.max(...days.map((d) => d.cost), 1);
+    $('spark-bars').innerHTML = days.map((d, i) => {
+      const today = i === days.length - 1;
+      const wd = today ? 'TODAY' : WEEKDAYS[new Date(d.date + 'T12:00:00Z').getUTCDay()];
+      return `<div class="sc${today ? ' today' : ''}">
+        <div class="sv">${d.cost >= 0.5 ? '$' + Math.round(d.cost) : '·'}</div>
+        <div class="sbwrap"><div class="sbar" style="height:${Math.max(2, Math.round(d.cost / max * 100))}%"></div></div>
+        <div class="sl">${wd}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function render() {
+    if (!data) return;
+    const s = data.slack ?? {}, c = data.claude ?? {};
+
+    // No live Slack data yet (token unconfigured / first sweep running):
+    // show placeholder numbers so the layout reads, dimmed via is-stale so
+    // they can't be mistaken for real, status line still carries the reason.
+    const noSlack = !s.updatedAt;
+    const dm = noSlack ? 3 : s.mentionsAndDms;
+    const ch = noSlack ? 7 : s.otherUnreadChannels;
+    $('slack-dm').textContent = dm ?? '·';
+    $('slack-dm').className = 'num' + (dm > 0 ? ' hot' : '');
+    $('slack-ch').textContent = ch ?? '·';
+    $('slack-ch').className = 'num' + (ch > 0 ? ' live' : '');
+    $('slack-pane').classList.toggle('is-stale', !s.updatedAt);
+
+    if (c.today) $('claude-cost').innerHTML =
+      '<span class="unit">$</span>' + c.today.cost.toFixed(2);
+    if (c.week) $('claude-week').textContent = '$' + c.week.cost.toFixed(0);
+    const n = c.sessions;
+    $('sessions').className = n > 0 ? '' : 'off';
+    $('sessions-text').textContent =
+      n == null ? '· · ·' : n > 0 ? `${n} active` : 'idle';
+    const projs = c.projects ?? [];
+    const MAX_PROJ = 8;
+    $('project-list').innerHTML = projs.slice(0, MAX_PROJ)
+      .map((p) => `<div class="proj"><span class="marker">▸</span>${p}</div>`)
+      .join('') + (projs.length > MAX_PROJ ? `<div class="proj more">+${projs.length - MAX_PROJ} more</div>` : '');
+    setBar('l5-fill', 'l5-meta', c.limits?.fiveHourPct, c.limits?.fiveHourResetAt, c.limits?.fiveHourCapAt);
+    setBar('lw-fill', 'lw-meta', c.limits?.weeklyPct, c.limits?.weeklyResetAt, c.limits?.weeklyCapAt);
+    renderSpark(c.days);
+    $('claude-pane').classList.toggle('is-stale', !c.updatedAt && !c.limits);
+
+    renderStatus();
+  }
+
+  // Errors are deliberately NOT rendered — the server log has them
+  // (lib/collector.js); the kiosk only signals freshness via color + dimming.
+  // Separate from render() so the age text can tick every second without
+  // rebuilding the whole page.
+  function renderStatus() {
+    const age = Date.now() - lastFetchOk;
+    const line = $('statusline');
+    if (!lastFetchOk) {
+      $('status-text').textContent = 'waiting for first data…';
+      line.className = '';
+    } else {
+      $('status-text').textContent = `updated ${fmtAgo(age)} ago`;
+      line.className = age > 300000 ? 'dead' : age > 120000 ? 'stale' : '';
+    }
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/status' + (mock ? '?mock=1' : ''), { cache: 'no-store' });
+      data = await res.json();
+      lastFetchOk = Date.now();
+    } catch { /* keep last data; status line ages out */ }
+    render();
+  }
+
+  function tickClock() {
+    const d = new Date();
+    $('clock').innerHTML =
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
+      ' <span class="date">· ' +
+      d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) + '</span>';
+  }
+
+  tickClock();
+  setInterval(tickClock, 1000);
+  refresh();
+  setInterval(refresh, 30000);
+  setInterval(render, 15000);       // keeps reset countdowns current
+  setInterval(renderStatus, 1000);  // "updated Ns ago" ticks every second
+</script>
+</body>
+</html>

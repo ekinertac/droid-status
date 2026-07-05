@@ -1,0 +1,11 @@
+{
+  "name": "droid-status",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kiosk status dashboard (Slack unreads + Claude usage) served from the Mac to a spare Android phone",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
