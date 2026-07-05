@@ -54,11 +54,11 @@
     font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    grid-template-columns: 7fr 3fr;
+    grid-template-columns: 55fr 20fr 25fr;
     grid-template-areas:
-      "head   head"
-      "claude sessions"
-      "status status";
+      "head   head     head"
+      "claude sessions slack"
+      "status status   status";
     padding: 3vh 3vw 2.5vh;
     column-gap: 2.5vw;
     row-gap: 3vh;
@@ -104,19 +104,19 @@
   .pane-title svg { display: block; }
   #claude-pane   { grid-area: claude; animation: reveal 0.5s 0.12s ease-out both; }
   #sessions-pane { grid-area: sessions; animation: reveal 0.5s 0.24s ease-out both; align-items: center; }
+  #slack-pane    { grid-area: slack; animation: reveal 0.5s 0.36s ease-out both; gap: 5vh; }
 
-  /* ── slack pane ─────────────────────────────────────────── */
-  .srow { display: flex; align-items: baseline; gap: 2.2vw; }
-  .srow + .srow { margin-top: 1vh; }
+  /* ── slack pane (narrow column: number stacked over label) ─ */
+  .srow { display: flex; flex-direction: column; align-items: center; gap: 0.4vh; }
   .srow .num {
-    font-size: 24vh; line-height: 1.05; font-weight: 800;
-    font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right;
+    font-size: 13vh; line-height: 1.05; font-weight: 800;
+    font-variant-numeric: tabular-nums;
     color: var(--faint);
   }
   .srow .num.hot { color: var(--coral); text-shadow: 0 0 40px rgba(217,119,87,0.4); }
   .srow .num.live { color: var(--fg); }
-  .srow .lbl { font-size: 3.6vh; color: var(--dim); line-height: 1.3; }
-  .srow .lbl b { display: block; color: var(--fg); font-weight: 500; font-size: 4vh; }
+  .srow .lbl { font-size: 2.7vh; color: var(--dim); line-height: 1.4; text-align: center; }
+  .srow .lbl b { display: block; color: var(--fg); font-weight: 500; font-size: 3vh; }
 
   /* ── claude pane ────────────────────────────────────────── */
   #claude-pane .cost-line { display: block; }
@@ -202,10 +202,6 @@
      forever (animations out-cascade class rules), so opacity would never
      apply; filter dims reliably. */
   .is-stale { filter: brightness(0.45) saturate(0.5); }
-
-  /* Slack parked for now (pane removed from the grid); its markup stays
-     below so bringing it back is a grid-areas change, not an excavation */
-  #slack-pane { display: none; }
 
   @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2vh); } }
   @keyframes spin { to { transform: rotate(360deg); } }
