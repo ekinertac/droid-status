@@ -14,6 +14,8 @@ forecast when you're burning too fast), a 7-day cost chart, and which
 projects have active sessions right now — plus optional Slack unread counts.
 Served from your Mac over LAN; the phone just runs a browser.
 
+![droid-status dashboard](docs/screenshot.jpg)
+
 macOS-only by design: it reads Claude Code's local transcripts, uses
 [ccusage](https://github.com/ryoppippi/ccusage) for cost data, and pulls the
 rate-limit numbers with the Claude Code OAuth token from the macOS Keychain
